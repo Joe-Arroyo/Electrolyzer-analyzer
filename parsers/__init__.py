@@ -1,8 +1,13 @@
 """
-Parsers for different potentiostat manufacturers.
-Currently supports: Gamry
+Parser modules for electrochemical data files
 """
 
-from .gamry import GamryParser, load_gamry_file
+from .gamry import load_gamry_file
+from .autolab import load_autolab_file, load_autolab_ascii, load_autolab_excel
 
-__all__ = ['GamryParser', 'load_gamry_file']
+__all__ = [
+    'load_gamry_file',
+    'load_autolab_file',
+    'load_autolab_ascii',
+    'load_autolab_excel'
+]

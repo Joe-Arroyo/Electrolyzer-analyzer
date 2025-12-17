@@ -156,7 +156,11 @@ class EISTab(QWidget):
         # Instrument selector
         file_layout.addWidget(QLabel("Instrument:"))
         self.instrument_combo = QComboBox()
-        self.instrument_combo.addItems(["Gamry (.DTA)", "Autolab (.xlsx) - Coming Soon"])
+        self.instrument_combo.addItems([
+            "Gamry (.DTA)", 
+            "Autolab ASCII (.txt)",
+            "Autolab Excel (.xlsx)"
+        ])
         file_layout.addWidget(self.instrument_combo)
         
         # Load button
@@ -267,8 +271,9 @@ class EISTab(QWidget):
         self.grid_nyquist_radio = QRadioButton("Nyquist only")
         self.grid_bode_radio = QRadioButton("Bode only")
         self.grid_both_radio = QRadioButton("Both (stacked)")
-        self.grid_nyquist_radio.setChecked(True)
-
+        self.grid_both_radio.setChecked(True)  # FIX 3: Make "Both" the default
+        
+        # Connect to auto-update
         self.grid_nyquist_radio.toggled.connect(self.update_plot)
         self.grid_bode_radio.toggled.connect(self.update_plot)
         self.grid_both_radio.toggled.connect(self.update_plot)
@@ -303,7 +308,7 @@ class EISTab(QWidget):
         
         self.grid_settings_widget.setVisible(False)  # Hidden by default
         plot_layout.addWidget(self.grid_settings_widget)
-      
+        
         plot_group.setLayout(plot_layout)
         left_layout.addWidget(plot_group)
         
@@ -360,6 +365,10 @@ class EISTab(QWidget):
         is_grid = self.grid_radio.isChecked()
         self.grid_settings_widget.setVisible(is_grid)
         self.overlay_settings_widget.setVisible(not is_grid)
+        
+        # FIX 3: Trigger update when switching to grid view
+        if is_grid and len(self.loaded_files) > 0:
+            self.update_plot()
     
     def load_files(self):
         """Load one or multiple EIS files"""
@@ -373,23 +382,50 @@ class EISTab(QWidget):
             
             if file_paths:
                 for file_path in file_paths:
-                    self.load_file(file_path)
-        else:
-            self.status_label.setText("⚠️ Autolab support coming soon")
+                    self.load_file(file_path, instrument_type='gamry')
+        
+        elif "ASCII" in instrument:
+            file_paths, _ = QFileDialog.getOpenFileNames(
+                self, "Select Autolab ASCII File(s)", "", "Text Files (*.txt);;All Files (*)"
+            )
+            
+            if file_paths:
+                for file_path in file_paths:
+                    self.load_file(file_path, instrument_type='autolab_ascii')
+        
+        elif "Excel" in instrument:
+            file_paths, _ = QFileDialog.getOpenFileNames(
+                self, "Select Autolab Excel File(s)", "", "Excel Files (*.xlsx *.xls);;All Files (*)"
+            )
+            
+            if file_paths:
+                for file_path in file_paths:
+                    self.load_file(file_path, instrument_type='autolab_excel')
     
-    def load_file(self, file_path):
+    def load_file(self, file_path, instrument_type='gamry'):
         """Load a single file and add to list"""
         
         try:
-            # Load with technique forced to 'eis'
-            data = load_gamry_file(file_path, technique='eis')
+            # Load based on instrument type
+            if instrument_type == 'gamry':
+                from parsers.gamry import load_gamry_file
+                data = load_gamry_file(file_path, technique='eis')
+            elif instrument_type == 'autolab_ascii':
+                from parsers.autolab import load_autolab_ascii
+                data = load_autolab_ascii(file_path)
+            elif instrument_type == 'autolab_excel':
+                from parsers.autolab import load_autolab_excel
+                data = load_autolab_excel(file_path)
+            else:
+                self.status_label.setText(f"❌ Unknown instrument type: {instrument_type}")
+                return
             
             if data and data.technique == 'eis':
                 filename = data.source_file.name
                 
                 # Add to dictionary
                 self.loaded_files[filename] = data
-                self.display_names[filename] = filename.replace('.DTA', '')
+                self.display_names[filename] = filename.replace('.DTA', '').replace('.txt', '').replace('.xlsx', '')
                 
                 # Add to list widget with checkbox
                 item = QListWidgetItem(filename)
@@ -412,6 +448,8 @@ class EISTab(QWidget):
         
         except Exception as e:
             self.status_label.setText(f"❌ Error loading {file_path}: {str(e)}")
+            import traceback
+            traceback.print_exc()
     
     def remove_selected_files(self):
         """Remove selected files from list"""
@@ -597,7 +635,7 @@ class EISTab(QWidget):
             ax2.set_yticks([])
             ax3.set_visible(False)
         
-        # Apply aspect ratio based on mode
+        # FIX 1 & 2: Apply aspect ratio ONLY to Nyquist, and constrain width
         aspect_mode = self._get_aspect_mode()
         
         if aspect_mode == 'equal':
@@ -610,24 +648,23 @@ class EISTab(QWidget):
             ax1.set_xlim(0, max_val)
             ax1.set_ylim(0, max_val)
             
-            # Adjust layout for square Nyquist plot
-            self.figure.subplots_adjust(left=0.1, right=0.9, bottom=0.08, top=0.95, hspace=0.3)
-            pos1 = ax1.get_position()
-            square_size = min(pos1.width, pos1.height)
-            ax1.set_position([pos1.x0, pos1.y1 - square_size, square_size, square_size])
-            pos2 = ax2.get_position()
-            ax2.set_position([pos1.x0, pos2.y0, pos1.width, pos2.height])
-            ax3.set_position([pos1.x0, pos2.y0, pos1.width, pos2.height])
+            # Use same layout as other modes for consistent appearance
+            self.figure.subplots_adjust(left=0.12, right=0.88, bottom=0.08, top=0.95, hspace=0.3)
+            
+            # Bode stays at full width (FIX 1: doesn't change with aspect ratio)
+            # No changes to ax2 and ax3 positions
+            
         elif aspect_mode == 'adjusted':
             # Lock aspect but allow different axis scales
-            # Let matplotlib auto-scale, then apply aspect ratio
             ax1.set_aspect('equal', adjustable='datalim')
-            self.figure.tight_layout()
+            # Constrain width (FIX 2)
+            self.figure.subplots_adjust(left=0.12, right=0.88, bottom=0.08, top=0.95, hspace=0.3)
         else:  # 'auto'
             # matplotlib handles it automatically, start from 0
             ax1.set_xlim(left=0)
             ax1.set_ylim(bottom=0)
-            self.figure.tight_layout()
+            # Constrain width (FIX 2)
+            self.figure.subplots_adjust(left=0.12, right=0.88, bottom=0.08, top=0.95, hspace=0.3)
         
         self.canvas.draw()
     
@@ -703,7 +740,7 @@ class EISTab(QWidget):
                 if marker_freqs:
                     self._add_frequency_markers(ax_nyq, data.z_real, data.z_imag, data.frequency, marker_freqs)
                 
-                # Apply aspect ratio
+                # FIX 1: Apply aspect ratio ONLY to Nyquist
                 if aspect_mode == 'equal':
                     ax_nyq.set_xlim(0, global_max)
                     ax_nyq.set_ylim(0, global_max)
@@ -723,7 +760,7 @@ class EISTab(QWidget):
                 ax_empty.set_xticks([])
                 ax_empty.set_yticks([])
             
-            # Bode plot (Row 1)
+            # Bode plot (Row 1) - FIX 1: No aspect ratio applied
             if show_bode:
                 plot_pos = n_files + idx + 1  # Row 1, columns 0 to n_files-1
                 ax_bode = self.figure.add_subplot(n_rows, n_files, plot_pos)
@@ -767,19 +804,19 @@ class EISTab(QWidget):
         # Get spacing preference
         spacing = self.spacing_combo.currentText()
         
-        # Define spacing values based on user preference
+        # FIX 4: Tighter horizontal spacing to make plots less wide
         if spacing == "Tight":
             h_space = 0.15
-            w_space = 0.10
-            margins = {'left': 0.05, 'right': 0.98, 'bottom': 0.05, 'top': 0.97}
+            w_space = 0.15  # Increased from 0.10
+            margins = {'left': 0.06, 'right': 0.97, 'bottom': 0.05, 'top': 0.97}
         elif spacing == "Loose":
             h_space = 0.40
-            w_space = 0.25
+            w_space = 0.30  # Increased from 0.25
             margins = {'left': 0.08, 'right': 0.95, 'bottom': 0.07, 'top': 0.95}
         else:  # Normal
             h_space = 0.25
-            w_space = 0.15
-            margins = {'left': 0.06, 'right': 0.97, 'bottom': 0.06, 'top': 0.96}
+            w_space = 0.20  # Increased from 0.15
+            margins = {'left': 0.07, 'right': 0.96, 'bottom': 0.06, 'top': 0.96}
         
         # Apply spacing
         self.figure.subplots_adjust(
