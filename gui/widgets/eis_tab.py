@@ -271,7 +271,7 @@ class EISTab(QWidget):
         self.grid_nyquist_radio = QRadioButton("Nyquist only")
         self.grid_bode_radio = QRadioButton("Bode only")
         self.grid_both_radio = QRadioButton("Both (stacked)")
-        self.grid_both_radio.setChecked(True)  # FIX 3: Make "Both" the default
+        self.grid_both_radio.setChecked(True)  # Make "Both" the default
         
         # Connect to auto-update
         self.grid_nyquist_radio.toggled.connect(self.update_plot)
@@ -366,7 +366,7 @@ class EISTab(QWidget):
         self.grid_settings_widget.setVisible(is_grid)
         self.overlay_settings_widget.setVisible(not is_grid)
         
-        # FIX 3: Trigger update when switching to grid view
+        # Trigger update when switching to grid view
         if is_grid and len(self.loaded_files) > 0:
             self.update_plot()
     
@@ -546,9 +546,10 @@ class EISTab(QWidget):
         
         self.figure.clear()
         
-        # Suppress log scale warning
+        # Suppress matplotlib warnings
         import warnings
         warnings.filterwarnings('ignore', message='Attempt to set non-positive xlim')
+        warnings.filterwarnings('ignore', message='Ignoring fixed .* limits')
         
         # Check if we should show Bode plots
         show_bode = self.show_bode_checkbox.isChecked()
@@ -635,8 +636,11 @@ class EISTab(QWidget):
             ax2.set_yticks([])
             ax3.set_visible(False)
         
-        # FIX 1 & 2: Apply aspect ratio ONLY to Nyquist, and constrain width
+        # Apply aspect ratio ONLY to Nyquist
         aspect_mode = self._get_aspect_mode()
+        
+        # Apply layout adjustments FIRST, before setting aspect
+        self.figure.subplots_adjust(left=0.12, right=0.88, bottom=0.08, top=0.95, hspace=0.3)
         
         if aspect_mode == 'equal':
             # Same scale on both axes (traditional locked aspect)
@@ -644,27 +648,19 @@ class EISTab(QWidget):
             max_zimag = max([-z for z in all_zimag]) if all_zimag else 1
             max_val = max(max_zreal, max_zimag) * 1.05
             
-            ax1.set_aspect('equal')
             ax1.set_xlim(0, max_val)
             ax1.set_ylim(0, max_val)
-            
-            # Use same layout as other modes for consistent appearance
-            self.figure.subplots_adjust(left=0.12, right=0.88, bottom=0.08, top=0.95, hspace=0.3)
-            
-            # Bode stays at full width (FIX 1: doesn't change with aspect ratio)
-            # No changes to ax2 and ax3 positions
+            ax1.set_aspect('equal', adjustable='box')
             
         elif aspect_mode == 'adjusted':
             # Lock aspect but allow different axis scales
+            # Set aspect AFTER subplots_adjust to avoid conflicts
             ax1.set_aspect('equal', adjustable='datalim')
-            # Constrain width (FIX 2)
-            self.figure.subplots_adjust(left=0.12, right=0.88, bottom=0.08, top=0.95, hspace=0.3)
+            
         else:  # 'auto'
             # matplotlib handles it automatically, start from 0
             ax1.set_xlim(left=0)
             ax1.set_ylim(bottom=0)
-            # Constrain width (FIX 2)
-            self.figure.subplots_adjust(left=0.12, right=0.88, bottom=0.08, top=0.95, hspace=0.3)
         
         self.canvas.draw()
     
@@ -672,6 +668,10 @@ class EISTab(QWidget):
         """Plot checked files in grid layout with simplified 2-row structure"""
         
         self.figure.clear()
+        
+        # Suppress matplotlib warnings
+        import warnings
+        warnings.filterwarnings('ignore', message='Ignoring fixed .* limits')
         
         # Get checked files in list order
         checked_files = []
@@ -710,6 +710,9 @@ class EISTab(QWidget):
         # Always use 2 rows for consistent sizing (don't let plots expand when one is hidden)
         n_rows = 2
         
+        # Store Nyquist axes for applying 'adjusted' aspect later
+        nyquist_axes = []
+        
         # Plot each file
         for idx, (filename, data) in enumerate(checked_files):
             # Letter label
@@ -719,6 +722,7 @@ class EISTab(QWidget):
             if show_nyquist:
                 plot_pos = idx + 1  # Row 0, columns 0 to n_files-1
                 ax_nyq = self.figure.add_subplot(n_rows, n_files, plot_pos)
+                nyquist_axes.append(ax_nyq)  # Store reference
                 
                 ax_nyq.plot(data.z_real, -data.z_imag, 'o', markersize=4, color='blue')
                 ax_nyq.set_xlabel('Z_real (Ω)', fontsize=8)
@@ -740,27 +744,27 @@ class EISTab(QWidget):
                 if marker_freqs:
                     self._add_frequency_markers(ax_nyq, data.z_real, data.z_imag, data.frequency, marker_freqs)
                 
-                # FIX 1: Apply aspect ratio ONLY to Nyquist
+                # Apply aspect ratio ONLY to Nyquist (will be finalized after subplots_adjust)
                 if aspect_mode == 'equal':
                     ax_nyq.set_xlim(0, global_max)
                     ax_nyq.set_ylim(0, global_max)
-                    ax_nyq.set_aspect('equal')
-                elif aspect_mode == 'adjusted':
-                    ax_nyq.set_aspect('equal', adjustable='datalim')
-                else:  # 'auto'
+                    ax_nyq.set_aspect('equal', adjustable='box')
+                elif aspect_mode == 'auto':
                     ax_nyq.set_xlim(left=0)
                     ax_nyq.set_ylim(bottom=0)
+                # 'adjusted' mode will be applied after subplots_adjust
+                
             else:
                 # Create empty placeholder for Nyquist row
                 plot_pos = idx + 1
                 ax_empty = self.figure.add_subplot(n_rows, n_files, plot_pos)
                 ax_empty.text(0.5, 0.5, '(Nyquist hidden)', 
-                             transform=ax_empty.transAxes, ha='center', va='center',
-                             fontsize=9, color='gray', style='italic')
+                            transform=ax_empty.transAxes, ha='center', va='center',
+                            fontsize=9, color='gray', style='italic')
                 ax_empty.set_xticks([])
                 ax_empty.set_yticks([])
             
-            # Bode plot (Row 1) - FIX 1: No aspect ratio applied
+            # Bode plot (Row 1) - No aspect ratio applied
             if show_bode:
                 plot_pos = n_files + idx + 1  # Row 1, columns 0 to n_files-1
                 ax_bode = self.figure.add_subplot(n_rows, n_files, plot_pos)
@@ -771,7 +775,7 @@ class EISTab(QWidget):
                 
                 ax_bode.semilogx(data.frequency, z_mod, 'o-', markersize=3, linewidth=1, color='blue')
                 ax_phase.semilogx(data.frequency, phase, 'o--', markersize=3, linewidth=1, 
-                                 color='red', alpha=0.7, markerfacecolor='None')
+                                color='red', alpha=0.7, markerfacecolor='None')
                 
                 ax_bode.set_xlabel('Frequency (Hz)', fontsize=8)
                 ax_bode.set_ylabel('|Z| (Ω)', fontsize=8, color='blue')
@@ -790,35 +794,35 @@ class EISTab(QWidget):
                         label_text = f"({letter})"
                     
                     ax_bode.text(0.02, 0.98, label_text, transform=ax_bode.transAxes,
-                                 fontsize=9, verticalalignment='top', horizontalalignment='left')
+                                fontsize=9, verticalalignment='top', horizontalalignment='left')
             else:
                 # Create empty placeholder for Bode row
                 plot_pos = n_files + idx + 1
                 ax_empty = self.figure.add_subplot(n_rows, n_files, plot_pos)
                 ax_empty.text(0.5, 0.5, '(Bode hidden)', 
-                             transform=ax_empty.transAxes, ha='center', va='center',
-                             fontsize=9, color='gray', style='italic')
+                            transform=ax_empty.transAxes, ha='center', va='center',
+                            fontsize=9, color='gray', style='italic')
                 ax_empty.set_xticks([])
                 ax_empty.set_yticks([])
         
         # Get spacing preference
         spacing = self.spacing_combo.currentText()
         
-        # FIX 4: Tighter horizontal spacing to make plots less wide
+        # Define spacing values
         if spacing == "Tight":
             h_space = 0.15
-            w_space = 0.15  # Increased from 0.10
+            w_space = 0.15
             margins = {'left': 0.06, 'right': 0.97, 'bottom': 0.05, 'top': 0.97}
         elif spacing == "Loose":
             h_space = 0.40
-            w_space = 0.30  # Increased from 0.25
+            w_space = 0.30
             margins = {'left': 0.08, 'right': 0.95, 'bottom': 0.07, 'top': 0.95}
         else:  # Normal
             h_space = 0.25
-            w_space = 0.20  # Increased from 0.15
+            w_space = 0.20
             margins = {'left': 0.07, 'right': 0.96, 'bottom': 0.06, 'top': 0.96}
         
-        # Apply spacing
+        # Apply spacing FIRST
         self.figure.subplots_adjust(
             left=margins['left'], 
             right=margins['right'], 
@@ -827,6 +831,11 @@ class EISTab(QWidget):
             hspace=h_space,
             wspace=w_space
         )
+        
+        # THEN apply 'adjusted' aspect ratios ONLY to stored Nyquist axes
+        if aspect_mode == 'adjusted' and nyquist_axes:
+            for ax_nyq in nyquist_axes:
+                ax_nyq.set_aspect('equal', adjustable='datalim')
         
         self.canvas.draw_idle()
         self.canvas.flush_events()
