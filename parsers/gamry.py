@@ -1,6 +1,6 @@
 """
-Gamry potentiostat file parser.
-Reads .DTA files and converts to unified ElectrolyzerData format.
+Gamry potentiostat file parser - FIXED VERSION
+Properly handles European decimal format and header rows
 """
 
 import pandas as pd
@@ -81,8 +81,18 @@ class GamryParser:
             # Clean column names
             df.columns = df.columns.str.strip()
             
-            # Convert to numeric where possible
+            # CRITICAL FIX: Remove the first row if it contains units
+            # Check if first row has non-numeric text like 's', 'V', 'A'
+            first_row_values = df.iloc[0].astype(str).values
+            if any(val in ['s', 'V', 'A', 'Hz', 'Ohm', 'V vs. Ref.'] for val in first_row_values):
+                df = df.iloc[1:].reset_index(drop=True)
+                print(f"  ℹ️  Removed units row")
+            
+            # Convert European format (comma) to dots before converting to numeric
             for col in df.columns:
+                if df[col].dtype == 'object':  # Only process string columns
+                    df[col] = df[col].astype(str).str.replace(',', '.')
+                
                 try:
                     df[col] = pd.to_numeric(df[col])
                 except (ValueError, TypeError):
@@ -184,13 +194,13 @@ class GamryParser:
         if not all([time_col, voltage_col, current_col]):
             raise ValueError(f"Missing required columns. Found: {df.columns.tolist()}")
         
-        # Create ElectrolyzerData object
+        # Create ElectrolyzerData object with properly converted numeric data
         return ElectrolyzerData(
             technique=technique,
             instrument='gamry',
-            time=df[time_col],
-            voltage=df[voltage_col],
-            current=df[current_col],
+            time=pd.to_numeric(df[time_col], errors='coerce'),
+            voltage=pd.to_numeric(df[voltage_col], errors='coerce'),
+            current=pd.to_numeric(df[current_col], errors='coerce'),
             source_file=Path(filepath)
         )
     
@@ -218,14 +228,10 @@ class GamryParser:
         # For EIS, time is not critical, we can use frequency as index
         time_series = pd.Series(range(len(df)), name='index')
         
-        # Handle European decimal format (comma to dot)
-        zreal_data = df[zreal_col].astype(str).str.replace(',', '.')
-        zimag_data = df[zimag_col].astype(str).str.replace(',', '.')
-        freq_data = df[freq_col].astype(str).str.replace(',', '.')
-        
-        zreal_numeric = pd.to_numeric(zreal_data, errors='coerce')
-        zimag_numeric = pd.to_numeric(zimag_data, errors='coerce')
-        freq_numeric = pd.to_numeric(freq_data, errors='coerce')
+        # Data is already converted to numeric in read_dta()
+        zreal_numeric = pd.to_numeric(df[zreal_col], errors='coerce')
+        zimag_numeric = pd.to_numeric(df[zimag_col], errors='coerce')
+        freq_numeric = pd.to_numeric(df[freq_col], errors='coerce')
         
         # Remove NaN values
         valid_mask = ~(zreal_numeric.isna() | zimag_numeric.isna() | freq_numeric.isna())

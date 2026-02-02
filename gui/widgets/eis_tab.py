@@ -8,7 +8,7 @@ from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel, 
     QFileDialog, QGroupBox, QComboBox, QLineEdit, QListWidget,
     QCheckBox, QListWidgetItem, QRadioButton, QButtonGroup, QSpinBox,
-    QScrollArea, QDialog, QFormLayout, QDialogButtonBox
+    QScrollArea, QDialog, QFormLayout, QDialogButtonBox, QMessageBox
 )
 from PyQt5.QtCore import Qt
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
@@ -143,7 +143,7 @@ class EISTab(QWidget):
         # Left panel - Controls (with scroll area)
         left_panel_container = QScrollArea()
         left_panel_container.setWidgetResizable(True)
-        left_panel_container.setMaximumWidth(320)
+        left_panel_container.setMaximumWidth(420)
         
         left_panel = QWidget()
         left_layout = QVBoxLayout(left_panel)
@@ -321,10 +321,11 @@ class EISTab(QWidget):
         self.export_csv_btn.setEnabled(False)
         export_layout.addWidget(self.export_csv_btn)
         
-        self.export_png_btn = QPushButton("Save Plot as PNG")
-        self.export_png_btn.clicked.connect(self.export_png)
-        self.export_png_btn.setEnabled(False)
-        export_layout.addWidget(self.export_png_btn)
+        self.export_plot_btn = QPushButton("Export Plot...")
+        self.export_plot_btn.setToolTip("Export current plot with custom size and DPI")
+        self.export_plot_btn.clicked.connect(self.export_plot)
+        self.export_plot_btn.setEnabled(False)
+        export_layout.addWidget(self.export_plot_btn)
         
         export_group.setLayout(export_layout)
         left_layout.addWidget(export_group)
@@ -417,7 +418,7 @@ class EISTab(QWidget):
                 from parsers.autolab import load_autolab_excel
                 data = load_autolab_excel(file_path)
             else:
-                self.status_label.setText(f"❌ Unknown instrument type: {instrument_type}")
+                self.status_label.setText(f"âŒ Unknown instrument type: {instrument_type}")
                 return
             
             if data and data.technique == 'eis':
@@ -438,16 +439,16 @@ class EISTab(QWidget):
                 
                 # Enable controls
                 self.export_csv_btn.setEnabled(True)
-                self.export_png_btn.setEnabled(True)
+                self.export_plot_btn.setEnabled(True)
                 self.edit_names_btn.setEnabled(True)
                 
                 # Plot
                 self.update_plot()
             else:
-                self.status_label.setText(f"❌ Not an EIS file: {file_path}")
+                self.status_label.setText(f"âŒ Not an EIS file: {file_path}")
         
         except Exception as e:
-            self.status_label.setText(f"❌ Error loading {file_path}: {str(e)}")
+            self.status_label.setText(f"âŒ Error loading {file_path}: {str(e)}")
             import traceback
             traceback.print_exc()
     
@@ -480,7 +481,7 @@ class EISTab(QWidget):
         
         # Disable controls
         self.export_csv_btn.setEnabled(False)
-        self.export_png_btn.setEnabled(False)
+        self.export_plot_btn.setEnabled(False)
         self.edit_names_btn.setEnabled(False)
     
     def edit_legend_names(self):
@@ -517,7 +518,7 @@ class EISTab(QWidget):
             
             # Replot with new names
             self.update_plot()
-            self.status_label.setText("✓ Legend names updated")
+            self.status_label.setText("[Icon]“ Legend names updated")
     
     def update_status(self):
         """Update status label"""
@@ -526,9 +527,9 @@ class EISTab(QWidget):
         if count == 0:
             self.status_label.setText("No files loaded")
         elif count == 1:
-            self.status_label.setText(f"✓ 1 file loaded")
+            self.status_label.setText(f"[Icon]“ 1 file loaded")
         else:
-            self.status_label.setText(f"✓ {count} files loaded")
+            self.status_label.setText(f"[Icon]“ {count} files loaded")
     
     def update_plot(self):
         """Update plot based on display mode"""
@@ -555,10 +556,17 @@ class EISTab(QWidget):
         show_bode = self.show_bode_checkbox.isChecked()
         show_titles = self.show_overlay_titles_checkbox.isChecked()
         
-        # Always create 2-subplot layout for consistent sizing
-        ax1 = self.figure.add_subplot(211)  # Nyquist (top)
-        ax2 = self.figure.add_subplot(212)  # Bode (bottom)
-        ax3 = ax2.twinx()  # Bode phase
+        # Dynamic layout based on show_bode checkbox
+        if show_bode:
+            # Two-subplot layout: Nyquist (top) + Bode (bottom)
+            ax1 = self.figure.add_subplot(211)  # Nyquist (top)
+            ax2 = self.figure.add_subplot(212)  # Bode (bottom)
+            ax3 = ax2.twinx()  # Bode phase
+        else:
+            # Single plot: Nyquist uses full area
+            ax1 = self.figure.add_subplot(111)  # Nyquist (full area)
+            ax2 = None
+            ax3 = None
         
         # Collect data for aspect ratio calculation
         all_zreal = []
@@ -581,7 +589,7 @@ class EISTab(QWidget):
                 ax1.plot(data.z_real, -data.z_imag, 
                         'o', markersize=5, color=color, label=self.display_names[filename])
                 
-                # Bode plots (only if enabled)
+                # Bode plots (only if enabled and axes exist)
                 if show_bode:
                     # Bode magnitude (left y-axis)
                     z_mod = np.sqrt(data.z_real**2 + data.z_imag**2)
@@ -598,12 +606,13 @@ class EISTab(QWidget):
                 color_idx += 1
         
         # Nyquist formatting
-        ax1.set_xlabel('Z_real (Ω)', fontsize=10)
-        ax1.set_ylabel('-Z_imag (Ω)', fontsize=10)
+        ax1.set_xlabel(r"Z' / $\Omega$", fontsize=16)
+        ax1.set_ylabel(r"-Z'' / $\Omega$", fontsize=16)
+        ax1.tick_params(axis='both', labelsize=14)
         if show_titles:
             ax1.set_title('Nyquist Plot', fontsize=11, fontweight='bold')
         ax1.grid(True, alpha=0.3)
-        ax1.legend(fontsize=8, loc='best')
+        ax1.legend(fontsize=14, loc='best')
         
         # Add frequency markers for all checked files
         marker_freqs = self._parse_frequency_markers(self.freq_markers_input.text())
@@ -617,30 +626,27 @@ class EISTab(QWidget):
         
         # Bode plot formatting (only if enabled)
         if show_bode:
-            ax2.set_xlabel('Frequency (Hz)', fontsize=10)
-            ax2.set_ylabel('|Z| (Ω)', fontsize=10, color='blue')
-            ax2.tick_params(axis='y', labelcolor='blue')
+            ax2.set_xlabel('Frequency (Hz)', fontsize=16, fontweight='bold')
+            ax2.set_ylabel(r'|Z| / $\Omega$', fontsize=16, fontweight='bold', color='blue')
+            ax2.tick_params(axis='both', labelcolor='blue', labelsize=14)
             if show_titles:
                 ax2.set_title('Bode Plot - Magnitude & Phase', fontsize=11, fontweight='bold')
             ax2.grid(True, alpha=0.3, which='both')
             
             # Phase axis formatting
-            ax3.set_ylabel('Phase (°)', fontsize=10, color='red')
-            ax3.tick_params(axis='y', labelcolor='red')
-        else:
-            # Hide Bode subplot but show it's intentionally hidden
-            ax2.text(0.5, 0.5, '(Bode plot hidden)', 
-                     transform=ax2.transAxes, ha='center', va='center',
-                     fontsize=11, color='gray', style='italic')
-            ax2.set_xticks([])
-            ax2.set_yticks([])
-            ax3.set_visible(False)
+            ax3.set_ylabel('Phase (deg)', fontsize=16, fontweight='bold', color='red')
+            ax3.tick_params(axis='y', labelcolor='red', labelsize=14)
         
         # Apply aspect ratio ONLY to Nyquist
         aspect_mode = self._get_aspect_mode()
         
-        # Apply layout adjustments FIRST, before setting aspect
-        self.figure.subplots_adjust(left=0.12, right=0.88, bottom=0.08, top=0.95, hspace=0.3)
+        # Apply layout adjustments based on layout type
+        if show_bode:
+            # Two-subplot layout
+            self.figure.subplots_adjust(left=0.12, right=0.88, bottom=0.08, top=0.95, hspace=0.3)
+        else:
+            # Single plot layout - use more of the available space
+            self.figure.subplots_adjust(left=0.10, right=0.90, bottom=0.10, top=0.95)
         
         if aspect_mode == 'equal':
             # Same scale on both axes (traditional locked aspect)
@@ -707,8 +713,11 @@ class EISTab(QWidget):
         # Get aspect mode
         aspect_mode = self._get_aspect_mode()
         
-        # Always use 2 rows for consistent sizing (don't let plots expand when one is hidden)
-        n_rows = 2
+        # Dynamic row calculation based on what's being shown
+        if show_nyquist and show_bode:
+            n_rows = 2  # Nyquist top, Bode bottom
+        else:
+            n_rows = 1  # Single row of plots
         
         # Store Nyquist axes for applying 'adjusted' aspect later
         nyquist_axes = []
@@ -718,17 +727,23 @@ class EISTab(QWidget):
             # Letter label
             letter = string.ascii_lowercase[idx] if idx < 26 else f"({idx})"
             
-            # Nyquist plot (Row 0)
+            # Nyquist plot
             if show_nyquist:
-                plot_pos = idx + 1  # Row 0, columns 0 to n_files-1
+                if n_rows == 1:
+                    # Single row layout - use simple positioning
+                    plot_pos = idx + 1
+                else:
+                    # Two-row layout - Nyquist on row 0
+                    plot_pos = idx + 1  # Row 0, columns 0 to n_files-1
+                
                 ax_nyq = self.figure.add_subplot(n_rows, n_files, plot_pos)
                 nyquist_axes.append(ax_nyq)  # Store reference
                 
-                ax_nyq.plot(data.z_real, -data.z_imag, 'o', markersize=4, color='blue')
-                ax_nyq.set_xlabel('Z_real (Ω)', fontsize=8)
-                ax_nyq.set_ylabel('-Z_imag (Ω)', fontsize=8)
+                ax_nyq.plot(data.z_real, -data.z_imag, 'o', markersize=6, color='blue')
+                ax_nyq.set_xlabel(r"Z' / $\Omega$", fontsize=12)
+                ax_nyq.set_ylabel(r"-Z'' / $\Omega$", fontsize=12)
                 ax_nyq.grid(True, alpha=0.3)
-                ax_nyq.tick_params(labelsize=7)
+                ax_nyq.tick_params(labelsize=10)
                 
                 # Add label in upper-left corner
                 if show_titles:
@@ -753,20 +768,16 @@ class EISTab(QWidget):
                     ax_nyq.set_xlim(left=0)
                     ax_nyq.set_ylim(bottom=0)
                 # 'adjusted' mode will be applied after subplots_adjust
-                
-            else:
-                # Create empty placeholder for Nyquist row
-                plot_pos = idx + 1
-                ax_empty = self.figure.add_subplot(n_rows, n_files, plot_pos)
-                ax_empty.text(0.5, 0.5, '(Nyquist hidden)', 
-                            transform=ax_empty.transAxes, ha='center', va='center',
-                            fontsize=9, color='gray', style='italic')
-                ax_empty.set_xticks([])
-                ax_empty.set_yticks([])
             
-            # Bode plot (Row 1) - No aspect ratio applied
+            # Bode plot
             if show_bode:
-                plot_pos = n_files + idx + 1  # Row 1, columns 0 to n_files-1
+                if n_rows == 1:
+                    # Single row layout - use simple positioning
+                    plot_pos = idx + 1
+                else:
+                    # Two-row layout - Bode on row 1
+                    plot_pos = n_files + idx + 1  # Row 1, columns 0 to n_files-1
+                
                 ax_bode = self.figure.add_subplot(n_rows, n_files, plot_pos)
                 ax_phase = ax_bode.twinx()
                 
@@ -777,14 +788,14 @@ class EISTab(QWidget):
                 ax_phase.semilogx(data.frequency, phase, 'o--', markersize=3, linewidth=1, 
                                 color='red', alpha=0.7, markerfacecolor='None')
                 
-                ax_bode.set_xlabel('Frequency (Hz)', fontsize=8)
-                ax_bode.set_ylabel('|Z| (Ω)', fontsize=8, color='blue')
-                ax_bode.tick_params(axis='y', labelcolor='blue', labelsize=7)
-                ax_bode.tick_params(axis='x', labelsize=7)
+                ax_bode.set_xlabel('Frequency (Hz)', fontsize=12)
+                ax_bode.set_ylabel('|Z| (Ohm)', fontsize=12, color='blue')
+                ax_bode.tick_params(axis='y', labelcolor='blue', labelsize=10)
+                ax_bode.tick_params(axis='x', labelsize=10)
                 ax_bode.grid(True, alpha=0.3, which='both')
                 
-                ax_phase.set_ylabel('Phase (°)', fontsize=8, color='red')
-                ax_phase.tick_params(axis='y', labelcolor='red', labelsize=7)
+                ax_phase.set_ylabel('Phase (deg)', fontsize=12, color='red')
+                ax_phase.tick_params(axis='y', labelcolor='red', labelsize=10)
                 
                 # Add label only if Nyquist is not shown
                 if not show_nyquist:
@@ -795,15 +806,6 @@ class EISTab(QWidget):
                     
                     ax_bode.text(0.02, 0.98, label_text, transform=ax_bode.transAxes,
                                 fontsize=9, verticalalignment='top', horizontalalignment='left')
-            else:
-                # Create empty placeholder for Bode row
-                plot_pos = n_files + idx + 1
-                ax_empty = self.figure.add_subplot(n_rows, n_files, plot_pos)
-                ax_empty.text(0.5, 0.5, '(Bode hidden)', 
-                            transform=ax_empty.transAxes, ha='center', va='center',
-                            fontsize=9, color='gray', style='italic')
-                ax_empty.set_xticks([])
-                ax_empty.set_yticks([])
         
         # Get spacing preference
         spacing = self.spacing_combo.currentText()
@@ -862,7 +864,7 @@ class EISTab(QWidget):
             
             combined_df = pd.concat(all_data, ignore_index=True)
             combined_df.to_csv(file_path, index=False)
-            self.status_label.setText(f"✓ Exported {len(self.loaded_files)} files to CSV")
+            self.status_label.setText(f"[Icon]“ Exported {len(self.loaded_files)} files to CSV")
     
     def export_png(self):
         """Export plot to PNG"""
@@ -873,4 +875,161 @@ class EISTab(QWidget):
         
         if file_path:
             self.figure.savefig(file_path, dpi=300, bbox_inches='tight')
-            self.status_label.setText(f"✓ Plot saved to PNG")
+            self.status_label.setText(f"[Icon]“ Plot saved to PNG")    
+    def export_plot(self):
+        """Export current plot with custom settings"""
+        
+        # Check if there's something to export
+        if len(self.loaded_files) == 0:
+            QMessageBox.warning(
+                self,
+                "No Data",
+                "Please load and display data before exporting"
+            )
+            return
+        
+        # Open export dialog
+        dialog = EISExportDialog(self)
+        if dialog.exec_() == QDialog.Accepted:
+            settings = dialog.get_settings()
+            
+            # Ask for save location
+            file_filter = f"{settings['format'].upper()} Files (*.{settings['format']})"
+            filepath, _ = QFileDialog.getSaveFileName(
+                self,
+                "Save Plot",
+                f"eis_plot.{settings['format']}",
+                file_filter
+            )
+            
+            if filepath:
+                try:
+                    # Save current figure size
+                    original_size = self.figure.get_size_inches()
+                    
+                    # Set new size
+                    self.figure.set_size_inches(settings['width'], settings['height'])
+                    
+                    # Save with specified DPI
+                    self.figure.savefig(
+                        filepath,
+                        dpi=settings['dpi'],
+                        format=settings['format'],
+                        bbox_inches='tight',
+                        facecolor='white'
+                    )
+                    
+                    # Restore original size
+                    self.figure.set_size_inches(original_size)
+                    self.canvas.draw()
+                    
+                    self.status_label.setText("✅ Plot exported successfully")
+                    
+                except Exception as e:
+                    QMessageBox.critical(
+                        self,
+                        "Export Failed",
+                        f"Error saving plot:\n{str(e)}"
+                    )
+
+
+class EISExportDialog(QDialog):
+    """Dialog for customizing EIS plot export settings"""
+    
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Export EIS Plot Settings")
+        self.setModal(True)
+        
+        layout = QVBoxLayout(self)
+        
+        # Size settings
+        size_group = QGroupBox("Plot Size (inches)")
+        size_layout = QVBoxLayout()
+        
+        # Width
+        width_layout = QHBoxLayout()
+        width_layout.addWidget(QLabel("Width:"))
+        self.width_spin = QSpinBox()
+        self.width_spin.setRange(4, 24)
+        self.width_spin.setValue(10)
+        self.width_spin.setSuffix(" in")
+        width_layout.addWidget(self.width_spin)
+        size_layout.addLayout(width_layout)
+        
+        # Height
+        height_layout = QHBoxLayout()
+        height_layout.addWidget(QLabel("Height:"))
+        self.height_spin = QSpinBox()
+        self.height_spin.setRange(4, 24)
+        self.height_spin.setValue(8)
+        self.height_spin.setSuffix(" in")
+        height_layout.addWidget(self.height_spin)
+        size_layout.addLayout(height_layout)
+        
+        size_group.setLayout(size_layout)
+        layout.addWidget(size_group)
+        
+        # DPI settings
+        dpi_group = QGroupBox("Resolution (DPI)")
+        dpi_layout = QHBoxLayout()
+        dpi_layout.addWidget(QLabel("DPI:"))
+        self.dpi_combo = QComboBox()
+        self.dpi_combo.addItems(['150', '300', '600', '1200'])
+        self.dpi_combo.setCurrentText('300')
+        self.dpi_combo.setEditable(True)
+        dpi_layout.addWidget(self.dpi_combo)
+        dpi_group.setLayout(dpi_layout)
+        layout.addWidget(dpi_group)
+        
+        # Format settings
+        format_group = QGroupBox("File Format")
+        format_layout = QHBoxLayout()
+        format_layout.addWidget(QLabel("Format:"))
+        self.format_combo = QComboBox()
+        self.format_combo.addItems(['png', 'pdf', 'svg', 'jpg', 'tiff'])
+        self.format_combo.setCurrentText('png')
+        format_layout.addWidget(self.format_combo)
+        format_group.setLayout(format_layout)
+        layout.addWidget(format_group)
+        
+        # Preset buttons
+        preset_layout = QHBoxLayout()
+        
+        paper_btn = QPushButton("Paper (8×6)")
+        paper_btn.clicked.connect(lambda: self.apply_preset(8, 6))
+        preset_layout.addWidget(paper_btn)
+        
+        presentation_btn = QPushButton("Presentation (12×8)")
+        presentation_btn.clicked.connect(lambda: self.apply_preset(12, 8))
+        preset_layout.addWidget(presentation_btn)
+        
+        poster_btn = QPushButton("Poster (16×12)")
+        poster_btn.clicked.connect(lambda: self.apply_preset(16, 12))
+        preset_layout.addWidget(poster_btn)
+        
+        layout.addLayout(preset_layout)
+        
+        # Dialog buttons
+        button_layout = QHBoxLayout()
+        ok_btn = QPushButton("Export")
+        ok_btn.clicked.connect(self.accept)
+        cancel_btn = QPushButton("Cancel")
+        cancel_btn.clicked.connect(self.reject)
+        button_layout.addWidget(ok_btn)
+        button_layout.addWidget(cancel_btn)
+        layout.addLayout(button_layout)
+    
+    def apply_preset(self, width, height):
+        """Apply preset size"""
+        self.width_spin.setValue(width)
+        self.height_spin.setValue(height)
+    
+    def get_settings(self):
+        """Get export settings from dialog"""
+        return {
+            'width': self.width_spin.value(),
+            'height': self.height_spin.value(),
+            'dpi': int(self.dpi_combo.currentText()),
+            'format': self.format_combo.currentText()
+        }

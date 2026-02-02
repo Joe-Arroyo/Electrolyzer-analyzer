@@ -33,7 +33,7 @@ class ChronopotentiometryTab(QWidget):
         # Left panel - Controls
         left_panel = QWidget()
         left_layout = QVBoxLayout(left_panel)
-        left_panel.setMaximumWidth(300)
+        left_panel.setMaximumWidth(400)
         
         # File loading group
         file_group = QGroupBox("📁 Load Data")
