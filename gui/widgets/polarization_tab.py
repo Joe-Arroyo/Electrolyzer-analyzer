@@ -30,6 +30,8 @@ from parsers.autolab import (
     load_autolab_chronopotentiometry_ascii,
     load_autolab_chronopotentiometry_excel
 )
+from parsers.riden import load_riden_file
+from parsers.custom_csv import load_custom_csv
 
 
 # Configure matplotlib defaults for consistent legends
@@ -155,6 +157,9 @@ class PolarizationTab(QWidget):
         self.undo_stack = []  # List of data state snapshots
         self.redo_stack = []
         self.max_undo_levels = 50
+
+        # Track highlighted regions in transient plot
+        self.transient_highlights = []
         
         self.init_ui()
         self.setup_shortcuts()
@@ -329,13 +334,20 @@ class PolarizationTab(QWidget):
         self.instrument_combo.addItems([
              "Gamry (.DTA)", 
              "Autolab ASCII (.txt)",
-             "Autolab Excel (.xlsx)"
+             "Autolab Excel (.xlsx)",
+             "Riden RD6006 (.xlsx)",
+             "Custom CSV (V,I,P,t)"
             ])
         layout.addWidget(self.instrument_combo)
 
         self.load_btn = QPushButton("Load Folder into Group")
         self.load_btn.clicked.connect(self.load_folder)
         layout.addWidget(self.load_btn)
+
+        # Single file loading (useful for Riden)
+        self.load_file_btn = QPushButton("Load Single File into Group")
+        self.load_file_btn.clicked.connect(self.load_single_file)
+        layout.addWidget(self.load_file_btn)
         
         self.load_status = QLabel("No data loaded")
         self.load_status.setWordWrap(True)
@@ -572,6 +584,120 @@ class PolarizationTab(QWidget):
             self.selected_point = None
             self.clear_selection_visual()
 
+    def highlight_current_step_in_transient(self, selected_point):
+        """Highlight the corresponding current step in transient plot"""
+        
+        # Only works if showing transients
+        if not self.radio_with_transient.isChecked():
+            return
+        
+        # Clear previous highlights
+        for artist in self.transient_highlights:
+            try:
+                artist.remove()
+            except:
+                pass
+        self.transient_highlights.clear()
+        
+        # Get selected point info
+        group_name = selected_point['group']
+        I_mean = selected_point['I']
+        
+        # Find transient voltage axis
+        # The transient axis has:
+        # - Title containing "Voltage Transients" OR
+        # - X-axis labeled with "Time" (not "Current Density")
+        transient_ax = None
+        for ax in self.fig.get_axes():
+            title = ax.get_title()
+            xlabel = ax.get_xlabel()
+            ylabel = ax.get_ylabel()
+            
+            # Check if this is the transient axis
+            if 'Voltage Transients' in title:
+                transient_ax = ax
+                break
+            elif 'Time' in xlabel and 'Voltage' in ylabel:
+                transient_ax = ax
+                break
+        
+        if transient_ax is None:
+            return
+        
+        # Get group data
+        if group_name not in self.groups:
+            return
+        
+        group = self.groups[group_name]
+        steps = group['steps']
+        data = group['data']
+        
+        if not steps or data is None:
+            return
+        
+        # Find matching step
+        time_offset = 0
+        found_step = False
+        
+        for filename in sorted(steps.keys()):
+            file_steps = steps[filename]
+            
+            for step_idx, step in enumerate(file_steps):
+                step_I_mean = step['I_mean']
+                
+                # Calculate time array for this step (needed for offset calculation)
+                t = step['time_rel'] + time_offset
+                
+                # Check if this step matches (within 1%)
+                if np.abs(step_I_mean - I_mean) / np.abs(I_mean) < 0.01:
+                    V = step['voltage']
+                    
+                    # Highlight with orange box
+                    highlight = transient_ax.axvspan(
+                        t[0], t[-1],
+                        alpha=0.3,
+                        color='orange',
+                        zorder=0
+                    )
+                    self.transient_highlights.append(highlight)
+                    
+                    # Add vertical line at start
+                    vline = transient_ax.axvline(
+                        t[0],
+                        color='red',
+                        linewidth=3,
+                        linestyle='--',
+                        alpha=0.8,
+                        zorder=10
+                    )
+                    self.transient_highlights.append(vline)
+                    
+                    # Add text annotation
+                    text_y = transient_ax.get_ylim()[1] * 0.95
+                    text = transient_ax.text(
+                        (t[0] + t[-1]) / 2,
+                        text_y,
+                        f'I = {I_mean*1000:.1f} mA',
+                        ha='center',
+                        va='top',
+                        fontsize=10,
+                        fontweight='bold',
+                        color='red',
+                        bbox=dict(boxstyle='round,pad=0.5', facecolor='yellow', alpha=0.8)
+                    )
+                    self.transient_highlights.append(text)
+                    
+                    found_step = True
+                    break
+                
+                # Update time offset for next step
+                time_offset = t[-1] if len(step['time_rel']) > 0 else time_offset
+            
+            if found_step:
+                break
+        
+        self.canvas.draw_idle()
+
     def clear_selection_visual(self):
         """Clear visual indicators of selection"""
         if self.selected_annotation is not None:
@@ -580,6 +706,14 @@ class PolarizationTab(QWidget):
             except:
                 pass
             self.selected_annotation = None
+        
+        # Clear transient highlights
+        for artist in self.transient_highlights:
+            try:
+                artist.remove()
+            except:
+                pass
+        self.transient_highlights.clear()
         
         # Remove any selection highlights
         for ax in self.fig.get_axes():
@@ -730,10 +864,19 @@ class PolarizationTab(QWidget):
         elif "ASCII" in instrument:
             file_pattern = "*.txt"
             dialog_title = "Select Folder with .txt Files"
-        else:  # Excel
+        elif "Autolab" in instrument:
             file_pattern = "*.xlsx"
             dialog_title = "Select Folder with .xlsx Files"
-        
+        elif "Riden" in instrument:
+            file_pattern = "*.xlsx"
+            dialog_title = "Select Folder with .xlsx Files"
+        elif "Custom CSV" in instrument:
+            file_pattern = "*.csv"
+            dialog_title = "Select Folder with .csv Files"
+        else:
+            file_pattern = "*.xlsx"
+            dialog_title = "Select Folder with .xlsx Files"
+
         folder = QFileDialog.getExistingDirectory(self, dialog_title)
         if not folder:
             return
@@ -745,7 +888,9 @@ class PolarizationTab(QWidget):
             data_files = list(folder_path.glob("*.DTA"))
         elif "ASCII" in instrument:
             data_files = list(folder_path.glob("*.txt"))
-        else:  # Excel
+        elif "Custom CSV" in instrument:
+            data_files = list(folder_path.glob("*.csv"))
+        else:  # Excel (Autolab & Riden)
             data_files = list(folder_path.glob("*.xlsx"))
         
         # Check if files were found
@@ -769,7 +914,11 @@ class PolarizationTab(QWidget):
                     data = load_gamry_file(file_path)
                 elif "ASCII" in instrument:
                     data = load_autolab_chronopotentiometry_ascii(file_path)
-                else:  # Excel
+                elif "Custom CSV" in instrument:
+                    data = load_custom_csv(file_path)
+                elif "Riden" in instrument:
+                    data = load_riden_file(file_path)
+                else:  # Excel (Autolab)
                     data = load_autolab_chronopotentiometry_excel(file_path)
                 
                 loaded_files[file_path.name] = data
@@ -813,6 +962,105 @@ class PolarizationTab(QWidget):
     # ===================================================================
     # DATA PROCESSING
     # ===================================================================
+
+    def load_single_file(self):
+        """Load a single file into the active group (useful for Riden)"""
+        if not self.active_group:
+            QMessageBox.warning(
+                self, 
+                "No Group Selected",
+                "Please create and select a group first"
+            )
+            return
+        
+        # Get selected instrument type
+        instrument = self.instrument_combo.currentText()
+        
+        # Set appropriate file extension filter
+        if "Gamry" in instrument:
+            file_filter = "DTA Files (*.DTA);;All Files (*)"
+            dialog_title = "Select .DTA File"
+        elif "ASCII" in instrument:
+            file_filter = "Text Files (*.txt);;All Files (*)"
+            dialog_title = "Select .txt File"
+        elif "Custom CSV" in instrument:
+            file_filter = "CSV Files (*.csv);;All Files (*)"
+            dialog_title = "Select .csv File"
+        elif "Autolab" in instrument or "Riden" in instrument:
+            file_filter = "Excel Files (*.xlsx);;All Files (*)"
+            dialog_title = "Select .xlsx File"
+        else:
+            file_filter = "All Files (*)"
+            dialog_title = "Select File"
+        
+        # Open file dialog
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            dialog_title,
+            "",
+            file_filter
+        )
+        
+        if not file_path:
+            return
+        
+        file_path = Path(file_path)
+        
+        print(f"\nLOAD Loading single file: {file_path}")
+        
+        # Load the file
+        try:
+            # Load based on instrument type
+            if "Gamry" in instrument:
+                data = load_gamry_file(file_path)
+            elif "ASCII" in instrument:
+                data = load_autolab_chronopotentiometry_ascii(file_path)
+            elif "Custom CSV" in instrument:
+                data = load_custom_csv(file_path)
+            elif "Autolab" in instrument:
+                data = load_autolab_chronopotentiometry_excel(file_path)
+            elif "Riden" in instrument:
+                data = load_riden_file(file_path, technique='chronopotentiometry')
+            else:
+                raise ValueError(f"Unknown instrument type: {instrument}")
+            
+            if data:
+                # Store in active group with just this one file
+                loaded_files = {file_path.name: data}
+                self.groups[self.active_group]['files'] = loaded_files
+                
+                # Process data
+                self.process_group(self.active_group)
+                
+                # Update UI
+                self.load_status.setText(f"Loaded {file_path.name} into {self.active_group}")
+                self.load_status.setStyleSheet("color: green;")
+                
+                # Enable export buttons
+                self.update_export_buttons()
+                
+                print(f"  OK {file_path.name}")
+                print(f"OK Loaded 1 file into {self.active_group}")
+                
+                # Auto-plot
+                self.update_plot()
+            else:
+                QMessageBox.warning(
+                    self,
+                    "Loading Failed",
+                    f"Failed to load {file_path.name}"
+                )
+                print(f"  ERROR {file_path.name}: Parser returned None")
+        
+        except Exception as e:
+            QMessageBox.critical(
+                self,
+                "Loading Error",
+                f"Error loading {file_path.name}:\n{str(e)}"
+            )
+            print(f"  ERROR {file_path.name}: {e}")
+            import traceback
+            traceback.print_exc()
 
     def process_group(self, group_name):
         """Process chronopotentiometry files to extract polarization curve"""
@@ -936,8 +1184,8 @@ class PolarizationTab(QWidget):
         # NO SMOOTHING AT ALL - use raw current
         diff = np.abs(np.diff(current))
         
-        # Simple threshold: 0.5 mA (0.0005 A)
-        threshold = 0.0005
+        # Simple threshold: 5.0 mA (0.005 A) - filters out small fluctuations
+        threshold = 0.005
         
         # Find where current changes
         change_indices = np.where(diff > threshold)[0]
@@ -1085,6 +1333,9 @@ class PolarizationTab(QWidget):
         if closest_point:
             self.selected_point = closest_point
             self.show_point_info(closest_point)
+            
+            # Highlight corresponding current step in transient plot
+            self.highlight_current_step_in_transient(closest_point)
             
             if self.edit_mode:
                 # Start drag operation
@@ -1593,6 +1844,9 @@ class PolarizationTab(QWidget):
         self.fig.clear()
         
         # Clear point tracking
+        # Clear highlights when replotting
+        self.transient_highlights.clear()
+
         self.point_artists.clear()
         self.selected_annotation = None
         
@@ -1748,7 +2002,7 @@ class PolarizationTab(QWidget):
                 current_mean = step['I_mean']
                 
                 # Plot voltage (primary axis)
-                ax2_voltage.plot(t, V, '-', linewidth=2, alpha=0.8, color=color, label='Voltage' if time_offset == 0 else "")
+                ax2_voltage.plot(t, V, 'o', markersize=4, alpha=0.8, color=color, label='Voltage' if time_offset == 0 else "")
                 
                 # Plot current as STEP FUNCTION (horizontal lines) - in milliamps
                 ax2_current.hlines(current_mean * 1000, t[0], t[-1], colors='gray', linestyles='--', 
@@ -1859,7 +2113,7 @@ class PolarizationTab(QWidget):
                         current_mean = step['I_mean']
                         
                         # Plot voltage
-                        ax2.plot(t, step['voltage'], '-', color=color, linewidth=2, alpha=0.8,
+                        ax2.plot(t, step['voltage'], 'o', color=color, markersize=4, alpha=0.8,
                                 label=name if time_offset == 0 else "")
                         
                         # Plot current as step function (mA) - only once for all groups
@@ -1944,7 +2198,7 @@ class PolarizationTab(QWidget):
                         current_mean = step['I_mean']
                         
                         # Plot voltage
-                        ax2.plot(t, step['voltage'], '-', color=color, linewidth=1.5, alpha=0.7)
+                        ax2.plot(t, step['voltage'], 'o', color=color, markersize=3, alpha=0.7)
                         
                         # Plot current as step function (mA)
                         ax2_current.hlines(current_mean * 1000, t[0], t[-1],
