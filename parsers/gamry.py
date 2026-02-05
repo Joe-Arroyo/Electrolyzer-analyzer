@@ -1,6 +1,6 @@
 """
-Gamry potentiostat file parser - FIXED VERSION
-Properly handles European decimal format and header rows
+Gamry potentiostat file parser - PANDAS 3.0 COMPATIBLE
+Properly handles European decimal format and pandas 3.x strict conversions
 """
 
 import pandas as pd
@@ -88,13 +88,20 @@ class GamryParser:
                 df = df.iloc[1:].reset_index(drop=True)
                 print(f"  ℹ️  Removed units row")
             
-            # Convert European format (comma) to dots before converting to numeric
+            # PANDAS 3.0 COMPATIBILITY FIX
+            # Must do comma replacement and numeric conversion in TWO SEPARATE steps
+            
+            # STEP 1: Convert European format (comma → dot) for ALL object columns
+            # This handles Spanish/European locale where decimals use comma: 1,5 instead of 1.5
             for col in df.columns:
                 if df[col].dtype == 'object':  # Only process string columns
                     df[col] = df[col].astype(str).str.replace(',', '.')
-                
+            
+            # STEP 2: Convert to numeric (after comma replacement is complete)
+            # Using errors='coerce' converts invalid values to NaN instead of raising errors
+            for col in df.columns:
                 try:
-                    df[col] = pd.to_numeric(df[col])
+                    df[col] = pd.to_numeric(df[col], errors='coerce')
                 except (ValueError, TypeError):
                     pass  # Keep as text if conversion fails
             

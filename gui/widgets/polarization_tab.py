@@ -26,6 +26,10 @@ import matplotlib.pyplot as plt
 from pathlib import Path
 
 from parsers.gamry import load_gamry_file
+from parsers.autolab import (
+    load_autolab_chronopotentiometry_ascii,
+    load_autolab_chronopotentiometry_excel
+)
 
 
 # Configure matplotlib defaults for consistent legends
@@ -320,6 +324,15 @@ class PolarizationTab(QWidget):
         box = QGroupBox("📁 Load Data")
         layout = QVBoxLayout()
         
+        layout.addWidget(QLabel("Instrument:"))
+        self.instrument_combo = QComboBox()
+        self.instrument_combo.addItems([
+             "Gamry (.DTA)", 
+             "Autolab ASCII (.txt)",
+             "Autolab Excel (.xlsx)"
+            ])
+        layout.addWidget(self.instrument_combo)
+
         self.load_btn = QPushButton("Load Folder into Group")
         self.load_btn.clicked.connect(self.load_folder)
         layout.addWidget(self.load_btn)
@@ -698,7 +711,7 @@ class PolarizationTab(QWidget):
     # ===================================================================
 
     def load_folder(self):
-        """Load all .DTA files from a folder into the active group"""
+        """Load all files from a folder into the active group"""
         if not self.active_group:
             QMessageBox.warning(
                 self, 
@@ -707,18 +720,41 @@ class PolarizationTab(QWidget):
             )
             return
         
-        folder = QFileDialog.getExistingDirectory(self, "Select Folder with .DTA Files")
+        # Get selected instrument type
+        instrument = self.instrument_combo.currentText()
+        
+        # Set appropriate file extension filter
+        if "Gamry" in instrument:
+            file_pattern = "*.DTA"
+            dialog_title = "Select Folder with .DTA Files"
+        elif "ASCII" in instrument:
+            file_pattern = "*.txt"
+            dialog_title = "Select Folder with .txt Files"
+        else:  # Excel
+            file_pattern = "*.xlsx"
+            dialog_title = "Select Folder with .xlsx Files"
+        
+        folder = QFileDialog.getExistingDirectory(self, dialog_title)
         if not folder:
             return
         
         folder_path = Path(folder)
-        dta_files = list(folder_path.glob("*.DTA"))
         
-        if not dta_files:
+        # Find files matching the pattern
+        if "Gamry" in instrument:
+            data_files = list(folder_path.glob("*.DTA"))
+        elif "ASCII" in instrument:
+            data_files = list(folder_path.glob("*.txt"))
+        else:  # Excel
+            data_files = list(folder_path.glob("*.xlsx"))
+        
+        # Check if files were found
+        if not data_files:
+            file_ext = file_pattern.replace("*", "")
             QMessageBox.warning(
                 self,
                 "No Files Found",
-                "No .DTA files found in the selected folder"
+                f"No {file_ext} files found in the selected folder"
             )
             return
         
@@ -726,9 +762,16 @@ class PolarizationTab(QWidget):
         
         # Load all files
         loaded_files = {}
-        for file_path in sorted(dta_files):
+        for file_path in sorted(data_files):
             try:
-                data = load_gamry_file(file_path)
+                # Load based on instrument type
+                if "Gamry" in instrument:
+                    data = load_gamry_file(file_path)
+                elif "ASCII" in instrument:
+                    data = load_autolab_chronopotentiometry_ascii(file_path)
+                else:  # Excel
+                    data = load_autolab_chronopotentiometry_excel(file_path)
+                
                 loaded_files[file_path.name] = data
                 print(f"  OK {file_path.name}")
             except Exception as e:
@@ -1665,8 +1708,7 @@ class PolarizationTab(QWidget):
         gs = GridSpec(2, 1, figure=self.fig, height_ratios=[1, 1.5], hspace=0.3)
         ax1 = self.fig.add_subplot(gs[0])  # Polarization (top)
         ax2 = self.fig.add_subplot(gs[1])  # Transients (bottom)
-        ax3 = ax2.twinx()  # Bode phase
-        
+                
         color = self.colors[0]
         
         # Top: Polarization curve
