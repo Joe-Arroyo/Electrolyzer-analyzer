@@ -2029,22 +2029,23 @@ class PolarizationTab(QWidget):
                     t_ss = step['time_rel'][ss_mask] + time_offset
                     V_ss = step['voltage'][ss_mask]
                     
-                    ax2_voltage.fill_between(
-                        t_ss, 
-                        V_ss.min() - 0.01, 
-                        V_ss.max() + 0.01,
-                        alpha=0.3, 
-                        color='yellow',
-                        label='Steady-state region' if time_offset == 0 else ""
-                    )
-                    
-                    # Mark average voltage
-                    ax2_voltage.plot(
-                        [t_ss[0], t_ss[-1]], 
-                        [row['V'], row['V']],
-                        'r--', linewidth=2, alpha=0.7,
-                        label='Average voltage' if time_offset == 0 else ""
-                    )
+                    if len(V_ss) > 0:
+                        ax2_voltage.fill_between(
+                            t_ss, 
+                            V_ss.min() - 0.01, 
+                            V_ss.max() + 0.01,
+                            alpha=0.3, 
+                            color='yellow',
+                            label='Steady-state region' if time_offset == 0 else ""
+                        )
+                        
+                        # Mark average voltage
+                        ax2_voltage.plot(
+                            [t_ss[0], t_ss[-1]], 
+                            [row['V'], row['V']],
+                            'r--', linewidth=2, alpha=0.7,
+                            label='Average voltage' if time_offset == 0 else ""
+                        )
                 
                 # Update offset - NO GAP, continuous time
                 time_offset = t[-1]
@@ -2141,12 +2142,13 @@ class PolarizationTab(QWidget):
                             t_ss = step['time_rel'][ss_mask] + time_offset
                             V_ss = step['voltage'][ss_mask]
                             
-                            ax2.fill_between(t_ss, V_ss.min() - 0.01, V_ss.max() + 0.01,
-                                           alpha=0.3, color='yellow',
-                                           label='Steady-state region' if time_offset == 0 and i == 0 else "")
-                            ax2.plot([t_ss[0], t_ss[-1]], [row['V'], row['V']],
-                                   'r--', linewidth=2, alpha=0.7,
-                                   label='Average voltage' if time_offset == 0 and i == 0 else "")
+                            if len(V_ss) > 0:
+                                ax2.fill_between(t_ss, V_ss.min() - 0.01, V_ss.max() + 0.01,
+                                               alpha=0.3, color='yellow',
+                                               label='Steady-state region' if time_offset == 0 and i == 0 else "")
+                                ax2.plot([t_ss[0], t_ss[-1]], [row['V'], row['V']],
+                                       'r--', linewidth=2, alpha=0.7,
+                                       label='Average voltage' if time_offset == 0 and i == 0 else "")
                         
                         time_offset = t[-1]
             
@@ -2223,10 +2225,11 @@ class PolarizationTab(QWidget):
                             t_ss = step['time_rel'][ss_mask] + time_offset
                             V_ss = step['voltage'][ss_mask]
                             
-                            ax2.fill_between(t_ss, V_ss.min() - 0.01, V_ss.max() + 0.01,
-                                           alpha=0.3, color='yellow')
-                            ax2.plot([t_ss[0], t_ss[-1]], [row['V'], row['V']],
-                                   'r--', linewidth=1.5, alpha=0.7)
+                            if len(V_ss) > 0:
+                                ax2.fill_between(t_ss, V_ss.min() - 0.01, V_ss.max() + 0.01,
+                                               alpha=0.3, color='yellow')
+                                ax2.plot([t_ss[0], t_ss[-1]], [row['V'], row['V']],
+                                       'r--', linewidth=1.5, alpha=0.7)
                         
                         time_offset = t[-1]
                 
