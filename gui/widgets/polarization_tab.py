@@ -1184,8 +1184,8 @@ class PolarizationTab(QWidget):
         # NO SMOOTHING AT ALL - use raw current
         diff = np.abs(np.diff(current))
         
-        # Simple threshold: 5.0 mA (0.005 A) - filters out small fluctuations
-        threshold = 0.005
+        # Simple threshold: 1.0 mA (0.001 A) - filters out small fluctuations
+        threshold = 0.001
         
         # Find where current changes
         change_indices = np.where(diff > threshold)[0]
@@ -1219,7 +1219,7 @@ class PolarizationTab(QWidget):
             duration = seg_time[-1] - seg_time[0]
             I_mean = np.mean(seg_current)
             I_std = np.std(seg_current)
-            variation = I_std / abs(I_mean) if I_mean != 0 else np.inf
+            variation = I_std / abs(I_mean) if abs(I_mean) > 0.01 else I_std
             
             if duration >= min_duration and variation < tolerance:
                 steps.append({
