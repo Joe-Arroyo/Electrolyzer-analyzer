@@ -1185,7 +1185,7 @@ class PolarizationTab(QWidget):
         diff = np.abs(np.diff(current))
         
         # Simple threshold: 1.0 mA (0.001 A) - filters out small fluctuations
-        threshold = 0.001
+        threshold = 0.0008
         
         # Find where current changes
         change_indices = np.where(diff > threshold)[0]
