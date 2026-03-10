@@ -1,3 +1,5 @@
+Full Readme file coming soon...
+
 GUI for electrolyzer data analysis. Allows the comparison of data from different sources.
 
 Features:
@@ -7,3 +9,4 @@ Polarization curve builder from galvanostatic steps
 EIS viewer
 Chronopotentiometry viewer
 2026 - 02 - 26: GitHub Release
+
