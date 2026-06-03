@@ -27,7 +27,3 @@ Plot export: configurable size, DPI (150–1200), and format (PNG, PDF, SVG, TIF
 Load and visualize raw voltage and/or current vs. time traces
 Optional time range filtering
 Export as CSV or PNG
-
-
-Supported Instruments & File Formats
-InstrumentTechniqueFormatGamryEIS, Polarization, Chronopotentiometry.DTAAutolab (Nova)EIS.txt (ASCII), .xlsxAutolab (Nova)Chronopotentiometry.txt (ASCII), .xlsxRiden RD6006Chronopotentiometry.xlsxCustom / NiWattsChronopotentiometry.csv (headerless)
