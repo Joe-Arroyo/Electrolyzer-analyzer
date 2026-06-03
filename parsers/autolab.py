@@ -318,6 +318,8 @@ def load_autolab_chronopotentiometry_ascii(file_path):
                 current_col = col
             elif current_col is None and 'current' in col_lower:
                 current_col = col
+            elif current_col is None and 'column 5' in col_lower:
+                current_col = col
         
         if not all([time_col, voltage_col, current_col]):
             print(f"Could not identify required columns in {file_path}")
@@ -329,7 +331,7 @@ def load_autolab_chronopotentiometry_ascii(file_path):
         # PANDAS 3.0 COMPATIBILITY: Convert to numeric
         time_data = pd.to_numeric(df[time_col], errors='coerce')
         voltage_data = pd.to_numeric(df[voltage_col], errors='coerce')
-        current_data = pd.to_numeric(df[current_col], errors='coerce')
+        current_data = pd.to_numeric(df[current_col], errors='coerce').ffill()
         
         # Remove any NaN values
         valid_mask = ~(time_data.isna() | voltage_data.isna() | current_data.isna())
