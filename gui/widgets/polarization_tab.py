@@ -2050,12 +2050,12 @@ class PolarizationTab(QWidget):
                 # Update offset - NO GAP, continuous time
                 time_offset = t[-1]
         
-        ax2_voltage.set_xlabel('Time [s]', fontsize=11, fontweight='bold')
-        ax2_voltage.set_ylabel('Voltage [V]', fontsize=11, fontweight='bold', color='black')
+        ax2_voltage.set_xlabel('Time [s]', fontsize=16, fontweight='bold')
+        ax2_voltage.set_ylabel('Voltage [V]', fontsize=16, fontweight='bold', color='black')
         ax2_voltage.tick_params(axis='y', labelcolor='black')
-        ax2_current.set_ylabel('Current [mA]', fontsize=11, fontweight='bold', color='gray')
+        ax2_current.set_ylabel('Current [mA]', fontsize=16, fontweight='bold', color='gray')
         ax2_current.tick_params(axis='y', labelcolor='gray')
-        ax2_voltage.set_title('Voltage Transients', fontsize=13, fontweight='bold')
+        ax2_voltage.set_title('Voltage Transients', fontsize=16, fontweight='bold')
         ax2_voltage.grid(True, alpha=0.3, linestyle='--')
         
         # Combine legends
