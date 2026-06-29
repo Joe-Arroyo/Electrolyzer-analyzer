@@ -94,7 +94,7 @@ def main():
     """Main entry point"""
     app = QApplication(sys.argv)
     window = ElectrolyzerAnalyzer()
-    window.show()
+    window.showMaximized()
     sys.exit(app.exec_())
 
 

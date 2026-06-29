@@ -382,12 +382,19 @@ class PolarizationTab(QWidget):
         btn_layout.addWidget(self.del_group_btn)
         
         layout.addLayout(btn_layout)
-        
+
+        self.avg_curves_btn = QPushButton("∑ Average checked groups")
+        self.avg_curves_btn.setToolTip(
+            "Average all checked groups into one curve with error bars (std across groups)"
+        )
+        self.avg_curves_btn.clicked.connect(self.compute_averaged_curve)
+        layout.addWidget(self.avg_curves_btn)
+
         self.group_status = QLabel("Create a group to start")
         self.group_status.setWordWrap(True)
         self.group_status.setStyleSheet("color: gray; font-size: 10px;")
         layout.addWidget(self.group_status)
-        
+
         box.setLayout(layout)
         return box
 
@@ -1172,7 +1179,88 @@ class PolarizationTab(QWidget):
             group['steps'] = None
             print("ERROR No polarization data extracted")
 
-    def detect_current_steps(self, time, current, voltage, 
+    def compute_averaged_curve(self):
+        """Average all checked groups into one curve with error bars (std across groups)."""
+
+        # Collect checked groups that have processed data
+        checked = []
+        for i in range(self.group_list.count()):
+            item = self.group_list.item(i)
+            name = item.text()
+            if item.checkState() == Qt.Checked and name in self.groups:
+                g = self.groups[name]
+                if g['data'] is not None:
+                    checked.append((name, g))
+
+        if len(checked) < 2:
+            QMessageBox.warning(
+                self, "Not enough groups",
+                "Check at least 2 processed groups to compute an average."
+            )
+            return
+
+        group_curves = []
+        for gname, g in checked:
+            df = g['data'].sort_values('j').reset_index(drop=True)
+            group_curves.append({'name': gname, 'j': df['j'].values, 'v': df['V'].values, 'n': len(df)})
+
+        n_steps = min(c['n'] for c in group_curves)
+        if n_steps == 0:
+            QMessageBox.warning(self, "Empty curves", "One or more groups have no steps.")
+            return
+
+        j_arrays = [c['j'][:n_steps] for c in group_curves]
+        v_arrays = [c['v'][:n_steps] for c in group_curves]
+        n_groups = len(group_curves)
+
+        j_mean = np.mean(j_arrays, axis=0)
+        v_mean = np.mean(v_arrays, axis=0)
+        v_std  = np.std(v_arrays, axis=0, ddof=1)
+
+        area = float(self.area_input.text() or 1.0)
+        avg_df = pd.DataFrame({
+            'file':             [f"avg({n_groups} groups)"] * n_steps,
+            'step':             np.arange(1, n_steps + 1),
+            'j':                j_mean,
+            'I_mean':           j_mean * area,
+            'V':                v_mean,
+            'V_std':            v_std,
+            'N_curves':         [n_groups] * n_steps,
+            'steady_start':     [np.nan] * n_steps,
+            'steady_duration':  [np.nan] * n_steps,
+        })
+
+        default_name = " + ".join(n for n, _ in checked) + " (avg)"
+        new_name, ok = QInputDialog.getText(
+            self, "Save averaged curve",
+            "Name for the new averaged group:",
+            text=default_name
+        )
+        if not ok or not new_name.strip():
+            return
+        new_name = new_name.strip()
+
+        if new_name in self.groups:
+            QMessageBox.warning(self, "Name exists", f"A group named '{new_name}' already exists.")
+            return
+
+        self.groups[new_name] = {
+            'files': {},
+            'data':  avg_df,
+            'steps': None,
+            'is_averaged': True,
+        }
+
+        item = QListWidgetItem(new_name)
+        item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
+        item.setCheckState(Qt.Checked)
+        self.group_list.addItem(item)
+
+        self.update_export_buttons()
+        self.update_plot()
+        print(f"OK Averaged {n_groups} groups → '{new_name}' ({n_steps} points)")
+
+    def detect_current_steps(self, time, current, voltage,
                             min_duration=5, tolerance=0.05):
         """
         Detect individual current steps in chronopotentiometry data.
@@ -1895,25 +1983,40 @@ class PolarizationTab(QWidget):
     def plot_polarization_overlay(self, groups):
         """Plot polarization curves overlaid on single axis"""
         ax = self.fig.add_subplot(111)
-        
+
         for i, (name, group) in enumerate(groups):
             data = group['data']
             color = self.colors[i % len(self.colors)]
-            
-            # Convert j from A/cm² to mA/cm²
             j_ma = data['j'] * 1000
-            
-            line, = ax.plot(
-                j_ma, data['V'],
-                marker='o', linestyle='-',
-                color=color, label=name,
-                markersize=6, linewidth=2
+
+            has_errors = (
+                'N_curves' in data.columns
+                and data['N_curves'].iloc[0] > 1
+                and 'V_std' in data.columns
             )
-            
-            # Store artist references for interaction
+
+            if has_errors:
+                n = data['N_curves'].iloc[0]
+                container = ax.errorbar(
+                    j_ma, data['V'],
+                    yerr=data['V_std'],
+                    marker='o', linestyle='-',
+                    color=color, label=f"{name} (n={n})",
+                    markersize=6, linewidth=2,
+                    capsize=4, capthick=1.5, elinewidth=1.5,
+                )
+                line = container.lines[0]
+            else:
+                line, = ax.plot(
+                    j_ma, data['V'],
+                    marker='o', linestyle='-',
+                    color=color, label=name,
+                    markersize=6, linewidth=2,
+                )
+
             if self.interaction_enabled:
                 self.point_artists[name] = line
-        
+
         ax.set_xlabel('Current Density [mA/cm²]', fontsize=16, fontweight='bold')
         ax.set_ylabel('Voltage [V]', fontsize=16, fontweight='bold')
         ax.tick_params(axis='both', labelsize=14)
@@ -1926,27 +2029,43 @@ class PolarizationTab(QWidget):
         n = len(groups)
         cols = min(2, n)
         rows = (n + cols - 1) // cols
-        
+
         for i, (name, group) in enumerate(groups):
             ax = self.fig.add_subplot(rows, cols, i + 1)
             data = group['data']
             color = self.colors[i % len(self.colors)]
-            
-            # Convert j from A/cm² to mA/cm²
             j_ma = data['j'] * 1000
-            
-            line, = ax.plot(
-                j_ma, data['V'],
-                marker='o', linestyle='-',
-                color=color,
-                markersize=5, linewidth=1.5
+
+            has_errors = (
+                'N_curves' in data.columns
+                and data['N_curves'].iloc[0] > 1
+                and 'V_std' in data.columns
             )
-            
-            # Store artist references for interaction
+
+            if has_errors:
+                n_curves = data['N_curves'].iloc[0]
+                container = ax.errorbar(
+                    j_ma, data['V'],
+                    yerr=data['V_std'],
+                    marker='o', linestyle='-',
+                    color=color,
+                    markersize=5, linewidth=1.5,
+                    capsize=4, capthick=1.5, elinewidth=1.5,
+                )
+                line = container.lines[0]
+                ax.set_title(f"{name} (n={n_curves})", fontsize=14, fontweight='bold')
+            else:
+                line, = ax.plot(
+                    j_ma, data['V'],
+                    marker='o', linestyle='-',
+                    color=color,
+                    markersize=5, linewidth=1.5,
+                )
+                ax.set_title(name, fontsize=14, fontweight='bold')
+
             if self.interaction_enabled:
                 self.point_artists[f"{name}_{i}"] = line
-            
-            ax.set_title(name, fontsize=14, fontweight='bold')
+
             ax.set_xlabel('j [mA/cm²]', fontsize=16)
             ax.set_ylabel('V [V]', fontsize=16)
             ax.tick_params(axis='both', labelsize=14)
@@ -1967,21 +2086,41 @@ class PolarizationTab(QWidget):
         
         # Top: Polarization curve
         j_ma = data['j'] * 1000  # Convert to mA/cm²
-        line, = ax1.plot(
-            j_ma, data['V'],
-            marker='o', linestyle='-',
-            color=color,
-            markersize=7, linewidth=2
+
+        has_errors = (
+            'N_curves' in data.columns
+            and data['N_curves'].iloc[0] > 1
+            and 'V_std' in data.columns
         )
-        
-        # Store artist reference for interaction
+
+        if has_errors:
+            n_curves = data['N_curves'].iloc[0]
+            container = ax1.errorbar(
+                j_ma, data['V'],
+                yerr=data['V_std'],
+                marker='o', linestyle='-',
+                color=color,
+                markersize=7, linewidth=2,
+                capsize=4, capthick=1.5, elinewidth=1.5,
+            )
+            line = container.lines[0]
+            title_str = f'Polarization Curve - {name} (n={n_curves})'
+        else:
+            line, = ax1.plot(
+                j_ma, data['V'],
+                marker='o', linestyle='-',
+                color=color,
+                markersize=7, linewidth=2,
+            )
+            title_str = f'Polarization Curve - {name}'
+
         if self.interaction_enabled:
             self.point_artists[name] = line
-        
+
         ax1.set_xlabel('Current Density [mA/cm²]', fontsize=16, fontweight='bold')
         ax1.set_ylabel('Voltage [V]', fontsize=16, fontweight='bold')
         ax1.tick_params(axis='both', labelsize=14)
-        ax1.set_title(f'Polarization Curve - {name}', fontsize=14, fontweight='bold')
+        ax1.set_title(title_str, fontsize=14, fontweight='bold')
         ax1.grid(True, alpha=0.3, linestyle='--')
         
         # Bottom: Voltage transients with highlighted steady-state regions
