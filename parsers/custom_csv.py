@@ -69,10 +69,16 @@ def load_custom_csv(filepath: str) -> Optional[ElectrolyzerData]:
         try:
             # Try parsing format: DD/MM/YYYY HH:MM:SS (your file format)
             df['datetime'] = pd.to_datetime(
-                df['timestamp'], 
-                format='%d/%m/%Y %H:%M:%S', 
+                df['timestamp'],
+                format='%d/%m/%Y %H:%M:%S',
                 errors='coerce'
             )
+            if df['datetime'].isna().all():
+                df['datetime'] = pd.to_datetime(
+                    df['timestamp'],
+                    format='%-d/%-m/%Y %H:%M:%S',
+                    errors='coerce'
+                )
             
             # If that fails, try auto-detection
             if df['datetime'].isna().all():
