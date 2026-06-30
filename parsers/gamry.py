@@ -94,7 +94,7 @@ class GamryParser:
             # STEP 1: Convert European format (comma → dot) for ALL object columns
             # This handles Spanish/European locale where decimals use comma: 1,5 instead of 1.5
             for col in df.columns:
-                if df[col].dtype == 'object':  # Only process string columns
+                if pd.api.types.is_string_dtype(df[col]) or pd.api.types.is_object_dtype(df[col]):
                     df[col] = df[col].astype(str).str.replace(',', '.')
             
             # STEP 2: Convert to numeric (after comma replacement is complete)
