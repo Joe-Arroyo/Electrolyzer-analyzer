@@ -89,6 +89,11 @@ pip install -r requirements.txt
 python main.py
 ```
 
+---
+# How to use it:
+See tutorial for a quick guide on how to use pyEAT.
+
+---
 
 ## AI Disclosure
 
