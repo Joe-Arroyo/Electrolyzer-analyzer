@@ -75,18 +75,8 @@ class ElectrolyzerAnalyzer(QMainWindow):
         
         QMessageBox.about(
             self,
-            "About Electrolyzer Analyzer",
-            "Electrolyzer Analyzer v2.0\n\n"
-            "A tool for analyzing electrochemical data.\n\n"
-            "Supports:\n"
-            "- EIS (Electrochemical Impedance Spectroscopy)\n"
-            "- Polarization curves\n"
-            "- Chronopotentiometry\n\n"
-            "Instruments:\n"
-            "- Gamry (implemented)\n"
-            "- Autolab (coming soon)\n"
-            "- Riden RD6006 (coming soon)\n\n"
-            "Built with PyQt5 and Python"
+            "About pyEAT",
+            "pyEAT: a Python Electrolysis Analysis Tool"
         )
 
 

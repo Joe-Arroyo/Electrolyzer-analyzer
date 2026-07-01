@@ -65,7 +65,7 @@ class CSVExportDialog(QDialog):
         type_group.setLayout(type_layout)
         layout.addWidget(type_group)
 
-        group_group = QGroupBox("Curves to Export")
+        group_group = QGroupBox("Groups to Export")
         group_layout = QVBoxLayout()
         self.group_checkboxes = {}
         if self.groups:
@@ -84,10 +84,7 @@ class CSVExportDialog(QDialog):
 
         format_group = QGroupBox("Format Options")
         format_layout = QVBoxLayout()
-        self.include_metadata = QCheckBox("Include metadata (electrode area, processing settings)")
-        self.include_metadata.setChecked(True)
-        format_layout.addWidget(self.include_metadata)
-        self.separate_files = QCheckBox("Separate file per curve")
+        self.separate_files = QCheckBox("Separate file per group")
         self.separate_files.setChecked(False)
         format_layout.addWidget(self.separate_files)
         format_group.setLayout(format_layout)
@@ -108,7 +105,6 @@ class CSVExportDialog(QDialog):
         return {
             'data_type': 'polarization' if self.polar_radio.isChecked() else 'transient',
             'groups': selected_groups,
-            'include_metadata': self.include_metadata.isChecked(),
             'separate_files': self.separate_files.isChecked()
         }
 
@@ -1420,7 +1416,7 @@ class PolarizationTab(QWidget):
         settings = dialog.get_export_settings()
 
         if not settings['groups']:
-            QMessageBox.warning(self, "No Curves Selected", "Please select at least one curve to export")
+            QMessageBox.warning(self, "No Groups Selected", "Please select at least one group to export")
             return
 
         if settings['separate_files']:
@@ -1455,7 +1451,7 @@ class PolarizationTab(QWidget):
             QMessageBox.critical(self, "Export Failed", f"Error exporting data:\n{str(e)}")
 
     def _build_flat_groups(self):
-        """Build flat {label: {data, steps}} dict for export dialog compatibility"""
+        """Build {gdisplay: {data, steps}} for the export dialog — one entry per group."""
         flat = {}
         for gkey, gdata in self.groups.items():
             gdisplay = self.group_display_names.get(gkey, gkey)
@@ -1464,80 +1460,87 @@ class PolarizationTab(QWidget):
             else:
                 for ckey, cdata in gdata['curves'].items():
                     if cdata['data'] is not None:
-                        cdisplay = self.curve_display_names.get(gkey, {}).get(ckey, ckey)
-                        flat[f"{gdisplay} / {cdisplay}"] = cdata
+                        flat[gdisplay] = cdata
+                        break
         return flat
 
+    def _build_group_section(self, data, group_name, curve_name, area):
+        """Build one export DataFrame section with the standard column layout."""
+        df = data.copy()
+        n = int(df['N_curves'].iloc[0]) if 'N_curves' in df.columns else 1
+        i_mean = df['I_mean'] if 'I_mean' in df.columns else df['j'] * area
+        return pd.DataFrame({
+            'j (mA/cm2)':           df['j'] * 1000,
+            'j (A/cm2)':            df['j'],
+            'I (mA)':               i_mean * 1000,
+            'I (A)':                i_mean,
+            'V':                    df['V'],
+            'V_uncertainty':        df['V_std'] if 'V_std' in df.columns else np.nan,
+            'electrode_area (cm2)': area,
+            'N_curves':             n,
+            'Group':                group_name,
+            'curve':                curve_name,
+        })
+
+    def _write_sections(self, sections, filepath):
+        """Write a list of DataFrames to filepath with a blank line between each section."""
+        with open(filepath, 'w', newline='') as f:
+            for i, section in enumerate(sections):
+                section.to_csv(f, index=False, header=(i == 0))
+                f.write('\n')
+
     def export_polarization_csv(self, settings, export_folder, single_filename=None, flat=None):
-        if flat is None:
-            flat = self._build_flat_groups()
+        try:
+            area = float(self.area_input.text())
+        except (ValueError, AttributeError):
+            area = 1.0
+
+        # Map group display name -> gkey
+        display_to_gkey = {
+            self.group_display_names.get(gk, gk): gk
+            for gk in self.groups
+        }
+
         exported_files = []
 
+        def sections_for_group(gdisplay):
+            gkey = display_to_gkey.get(gdisplay)
+            if gkey is None:
+                return []
+            gdata = self.groups[gkey]
+            secs = []
+
+            # Averaged section first
+            if gdata['averaged_data'] is not None:
+                secs.append(self._build_group_section(
+                    gdata['averaged_data'], gdisplay, 'averaged', area
+                ))
+
+            # Then individual curves
+            for ckey, cdata in gdata['curves'].items():
+                if cdata['data'] is not None:
+                    cdisplay = self.curve_display_names.get(gkey, {}).get(ckey, ckey)
+                    secs.append(self._build_group_section(
+                        cdata['data'], gdisplay, cdisplay, area
+                    ))
+            return secs
+
         if settings['separate_files']:
-            for group_name in settings['groups']:
-                group = flat.get(group_name)
-                if group is None or group['data'] is None:
+            for gdisplay in settings['groups']:
+                secs = sections_for_group(gdisplay)
+                if not secs:
                     continue
-
-                safe_name = "".join(c for c in group_name if c.isalnum() or c in (' ', '-', '_')).strip()
-                filename = f"polarization_{safe_name}.csv"
-                filepath = export_folder / filename
-
-                export_data = group['data'].copy()
-                export_data['Group'] = group_name
-                export_data['j_mA_cm2'] = export_data['j'] * 1000
-                columns = ['Group', 'file', 'step', 'j_mA_cm2', 'j', 'V', 'V_std', 'I_mean',
-                           'steady_start', 'steady_duration']
-                export_data = export_data[[c for c in columns if c in export_data.columns]]
-
-                if settings['include_metadata']:
-                    meta = [
-                        f"# Polarization Curve Data - {group_name}",
-                        f"# Exported from Electrolyzer Analyzer",
-                        f"# Averaging time: {self.avg_time_input.text()} s",
-                        f"# Electrode area: {self.area_input.text()} cm²",
-                        ""
-                    ]
-                    with open(filepath, 'w') as f:
-                        f.write('\n'.join(meta))
-                        export_data.to_csv(f, index=False)
-                else:
-                    export_data.to_csv(filepath, index=False)
-
+                safe = "".join(c for c in gdisplay if c.isalnum() or c in (' ', '-', '_')).strip()
+                filepath = export_folder / f"polarization_{safe}.csv"
+                self._write_sections(secs, filepath)
                 exported_files.append(filepath)
         else:
-            all_data = []
-            for group_name in settings['groups']:
-                group = flat.get(group_name)
-                if group is None or group['data'] is None:
-                    continue
-                gd = group['data'].copy()
-                gd['Group'] = group_name
-                all_data.append(gd)
-
-            if all_data:
-                combined = pd.concat(all_data, ignore_index=True)
-                combined['j_mA_cm2'] = combined['j'] * 1000
-                columns = ['Group', 'file', 'step', 'j_mA_cm2', 'j', 'V', 'V_std', 'I_mean',
-                           'steady_start', 'steady_duration']
-                combined = combined[[c for c in columns if c in combined.columns]]
+            all_sections = []
+            for gdisplay in settings['groups']:
+                all_sections.extend(sections_for_group(gdisplay))
+            if all_sections:
                 filepath = export_folder / single_filename
-
-                if settings['include_metadata']:
-                    meta = [
-                        f"# Combined Polarization Curve Data",
-                        f"# Exported from Electrolyzer Analyzer",
-                        f"# Groups: {', '.join(settings['groups'])}",
-                        f"# Averaging time: {self.avg_time_input.text()} s",
-                        f"# Electrode area: {self.area_input.text()} cm²",
-                        ""
-                    ]
-                    with open(filepath, 'w') as f:
-                        f.write('\n'.join(meta))
-                        combined.to_csv(f, index=False)
-                else:
-                    combined.to_csv(filepath, index=False)
-
+                self._write_sections(all_sections, filepath)
                 exported_files.append(filepath)
 
         return exported_files
@@ -1578,13 +1581,7 @@ class PolarizationTab(QWidget):
                 combined = pd.concat(rows, ignore_index=True)
                 safe_name = "".join(c for c in group_name if c.isalnum() or c in (' ', '-', '_')).strip()
                 filepath = export_folder / f"transient_{safe_name}.csv"
-                if settings['include_metadata']:
-                    meta = [f"# Transient Data - {group_name}", f"# Exported from Electrolyzer Analyzer", ""]
-                    with open(filepath, 'w') as f:
-                        f.write('\n'.join(meta))
-                        combined.to_csv(f, index=False)
-                else:
-                    combined.to_csv(filepath, index=False)
+                combined.to_csv(filepath, index=False)
                 exported_files.append(filepath)
         else:
             all_rows = []
@@ -1596,13 +1593,7 @@ class PolarizationTab(QWidget):
             if all_rows:
                 combined = pd.concat(all_rows, ignore_index=True)
                 filepath = export_folder / single_filename
-                if settings['include_metadata']:
-                    meta = [f"# Combined Transient Data", f"# Exported from Electrolyzer Analyzer", ""]
-                    with open(filepath, 'w') as f:
-                        f.write('\n'.join(meta))
-                        combined.to_csv(f, index=False)
-                else:
-                    combined.to_csv(filepath, index=False)
+                combined.to_csv(filepath, index=False)
                 exported_files.append(filepath)
 
         return exported_files
