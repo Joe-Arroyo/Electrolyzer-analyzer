@@ -34,8 +34,7 @@ A Python GUI application for electrochemical characterization of electrolyzers. 
 | Instrument | EIS | Polarization | Chronopotentiometry |
 |---|---|---|---|
 | Gamry (.DTA) | ✓ | ✓ | ✓ |
-| Autolab ASCII (.txt) | ✓ | ✓ | ✓ |
-| Autolab Excel (.xlsx) | ✓ | ✓ | ✓ |
+| Autolab ASCII (.xlsx, .txt) | ✓ | ✓ | ✓ |
 | Riden RD6006 (.xlsx) | — | ✓ | ✓ |
 | Custom CSV | — | ✓ | ✓ |
 
